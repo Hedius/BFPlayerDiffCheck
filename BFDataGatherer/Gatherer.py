@@ -166,6 +166,10 @@ class Gatherer:
         diff_keeper = keeper_count - player_count
         diff_profile = true_player_count - player_count
 
+        if self._game != self.GAME_BF4:
+            keeper_count = '?'
+            diff_keeper = '?'
+
         time = datetime.now().replace(microsecond=0)
         log_stdout()
         log_csv()
