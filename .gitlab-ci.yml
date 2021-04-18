@@ -1,0 +1,19 @@
+image: python:3
+stages:
+  - code quality
+
+flake8:
+  stage: code quality
+  tags:
+    - docker
+  script:
+    - python -m pip install flake8
+    - flake8 .
+
+# Pylama:
+#   stage: code quality
+#   tags:
+#     - docker
+#   script:
+#     - python -m pip install pylama
+#     - pylama .
