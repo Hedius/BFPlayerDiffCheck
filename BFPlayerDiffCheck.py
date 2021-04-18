@@ -42,6 +42,9 @@ def main():
                         dest='interval',
                         default=20,
                         help='Logging interval in seconds. Min 10s.')
+    parser.add_argument('--webhook',
+                        dest='webhook',
+                        help='Discord webhook for unranked logging.')
     args = parser.parse_args()
 
     try:
@@ -54,7 +57,7 @@ def main():
     gatherer = Gatherer(args.guid, interval, args.game)
     loop = asyncio.get_event_loop()
     try:
-        loop.run_until_complete(gatherer.monitor(args.csv_file))
+        loop.run_until_complete(gatherer.monitor(args.csv_file, args.webhook))
     finally:
         loop.close()
 

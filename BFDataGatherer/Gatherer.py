@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Tuple
 
 import aiohttp
+from discord_webhook import DiscordWebhook, DiscordEmbed
 
 headers = {
     'User-Agent': 'BFPlayerDiffCheck by Hedius',
@@ -61,11 +62,14 @@ class Gatherer:
 
         self._url_keeper = f'https://keeper.battlelog.com/snapshot/{guid}'
 
+        self._name = "Unknown"
         self._player_count = 0
         self._keeper_count = 0
         self._true_player_count = 0
         self._max_slots = 0
         self._queue = 0
+        self._ranked = None
+        self._ranked_previous = None
 
         self._lock = asyncio.Lock()
 
@@ -96,21 +100,26 @@ class Gatherer:
         return player_count
 
     async def get_counts_profile(self, session: aiohttp.ClientSession)\
-            -> Tuple[int, int, int, int]:
+            -> Tuple[int, int, int, int, bool]:
         """
         Pull data from server profile
         :param session: async session
-        :return: 4-Tuple: player_count, max_slots, queue, true_player_count
+        :return: 5-Tuple: player_count, max_slots, queue, true_player_count,
+            ranked
         """
-        player_count = max_slots = queue = true_player_count = 0
+        player_count = max_slots = queue = true_player_count = -1
+        ranked = self._ranked
+        name = 'N/A'
         try:
             async with session.get(self._url_profile, headers=headers) as r:
                 data = await r.json()
                 if data['type'] == 'success':
+                    name = data['message']['SERVER_INFO']['name']
                     slots = data['message']['SERVER_INFO']['slots']
                     player_count = slots['2']['current']
                     max_slots = slots['2']['max']
                     queue = slots['1']['current']
+                    ranked = data['message']['SERVER_INFO']['serverType'] != 4
                     true_player_count = len(data['message']['SERVER_PLAYERS'])
 
         except (TypeError, aiohttp.ClientError, aiohttp.ContentTypeError):
@@ -118,26 +127,30 @@ class Gatherer:
                 f'Profile request: Server with guid {self._guid} is offline.')
 
         async with self._lock:
+            self._name = name
             self._player_count = player_count
             self._max_slots = max_slots
             self._queue = queue
             self._true_player_count = true_player_count
-        return player_count, max_slots, queue, true_player_count
+            self._ranked = ranked
+            if self._ranked_previous is None:
+                self._ranked_previous = ranked
+        return player_count, max_slots, queue, true_player_count, ranked
 
     async def _log_results(self, log_file):
         def log_stdout():
             logging.info(
                 '%s Players: %s, TrueCountKeeper: %s, TrueCountProfile: '
                 '%s, MaxCount: %s, Queue: %s, DiffKeeper: %s, '
-                'DiffProfile: %s',
+                'DiffProfile: %s, Ranked: %s',
                 time, player_count, keeper_count, true_player_count,
-                max_slots, queue, diff_keeper, diff_profile)
+                max_slots, queue, diff_keeper, diff_profile, ranked)
 
         def log_csv():
             header = ['date_time', 'players', 'true_count_keeper',
                       'true_count_profile', 'max_count', 'queue',
                       'diff_keeper',
-                      'diff_profile']
+                      'diff_profile', 'ranked']
             file_exists = os.path.exists(log_file)
             data = {
                 'date_time': time,
@@ -147,7 +160,8 @@ class Gatherer:
                 'max_count': max_slots,
                 'queue': queue,
                 'diff_keeper': diff_keeper,
-                'diff_profile': diff_profile
+                'diff_profile': diff_profile,
+                'ranked': ranked
             }
             with open(log_file, mode='a') as fp:
                 writer = csv.DictWriter(fp, header)
@@ -162,6 +176,7 @@ class Gatherer:
             max_slots = self._max_slots
             queue = self._queue
             true_player_count = self._true_player_count
+            ranked = self._ranked
 
         diff_keeper = keeper_count - player_count
         diff_profile = true_player_count - player_count
@@ -174,11 +189,34 @@ class Gatherer:
         log_stdout()
         log_csv()
 
-    async def monitor(self, log_file: str):
+    async def check_unranked(self, webhook_url):
+        async with self._lock:
+            if self._ranked == self._ranked_previous:
+                return False
+            self._ranked_previous = self._ranked
+
+        embed = DiscordEmbed(
+            title=f'SERVER IS {"RANKED" if self._ranked else "UNRANKED"}',
+            description=(
+                f'**{self._name}** is '
+                'RANKED' if self._ranked else 'UNRANKED'
+            ),
+            color='0fef00' if self._ranked else 'f72731',
+            timestamp=str(datetime.utcnow())
+        )
+        embed.add_embed_field(name='Name', value=self._name, inline=False),
+        embed.add_embed_field(name='Ranked', value=str(self._ranked))
+
+        webhook = DiscordWebhook(webhook_url)
+        webhook.add_embed(embed)
+        webhook.execute()
+
+    async def monitor(self, log_file: str, webhook=None):
         """
         Monitor the given server and display the status stout.
         Also write the log data to a csv.
         :param log_file: path to file
+        :param webhook: discord_webhook for unranked monitoring
         """
         async def monitor_task():
             """asyncio task for fetching new data from battlelog"""
@@ -189,5 +227,13 @@ class Gatherer:
                     await self._log_results(log_file)
                     await asyncio.sleep(self._request_interval)
 
+        async def unranked_announcer_task():
+            while True:
+                await self.check_unranked(webhook)
+                await asyncio.sleep(30)
+
         task_gatherer = asyncio.create_task(monitor_task())
+        if webhook:
+            task_unranked = asyncio.create_task(unranked_announcer_task())
+            await task_unranked
         await task_gatherer
