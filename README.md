@@ -1,9 +1,11 @@
-# BF Player Diff Check
+# BF Player Diff Check & Unranked check
 Simple tool for logging different player counts of battlefield servers. Writes data to stdout + to a csv.
+Also used to log to discord if a server switches to
+unranked while being online.
 
 ## Usage
 ```
-usage: BFPlayerDiffCheck.py [-h] -v {bf3,bf4} -g GUID [-w CSV_FILE] [-i INTERVAL]
+usage: BFPlayerDiffCheck.py [-h] -v {bf3,bf4} -g GUID [-w CSV_FILE] [-i INTERVAL] [--webhook WEBHOOK]
 
 Simple tool for logging different player counts of battlefield servers. Writes data to stdout + to a csv.
 
@@ -16,7 +18,7 @@ optional arguments:
                         Optional path to csv log. Default server_log.csv
   -i INTERVAL, --interval INTERVAL
                         Logging interval in seconds. Min 10s.
-
+  --webhook WEBHOOK     Discord webhook for unranked logging.
 ```
 
 
